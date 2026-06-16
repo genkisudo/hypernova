@@ -17,7 +17,7 @@ with ranked as (
             partition by dailyDrawdownLimit, maxDrawdownLimit, profitTarget
             order by evt_block_time desc
         ) as rn
-    from hypernova_arbitrum.TradingAccounts_evt_EvalAccountCreated
+    from hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated
 )
 
 select

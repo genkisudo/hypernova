@@ -2,11 +2,11 @@
 -- Hypernova: Proof of Funds — Vault & Treasury Balances
 -- ============================================================================
 -- Reconstructs each tracked wallet's current USDC balance by netting every
--- inbound and outbound transfer since 2026-04-01 — an on-chain, independent
--- cross-check of reserves.
+-- inbound and outbound transfer since 2026-03-25 (platform launch) — an
+-- on-chain, independent cross-check of reserves.
 --
 -- Tracked wallets: Vault (0x9209...4c67), Treasury (0x43C5...DA07).
--- Balance excludes any funds held before the 2026-04-01 cutoff.
+-- Balance excludes any funds held before the 2026-03-25 cutoff.
 
 with wallet_list as (
     select address
@@ -28,7 +28,7 @@ with wallet_list as (
         on t.contract_address = tk.contract_address
        and tk.blockchain = 'arbitrum'
     where t.contract_address = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
-      and t.evt_block_date >= date '2026-04-01'
+      and t.evt_block_date >= date '2026-03-25'
       and t."from" in (select address from wallet_list)
 )
 
@@ -43,7 +43,7 @@ with wallet_list as (
         on t.contract_address = tk.contract_address
        and tk.blockchain = 'arbitrum'
     where t.contract_address = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
-      and t.evt_block_date >= date '2026-04-01'
+      and t.evt_block_date >= date '2026-03-25'
       and t."to" in (select address from wallet_list)
 )
 

@@ -60,7 +60,5 @@ SELECT
     count_if(paid_accounts > 0)                                 AS paid_users,
     count_if(paid_accounts = 0)                                 AS free_users,
     count_if(paid_accounts > 0 AND paid_accounts < total_accounts) AS mixed_users,
-    count_if(paid_accounts > 0 AND paid_accounts = total_accounts) AS fully_paid_users,
-    sum(paid_accounts)                                          AS paid_accounts_check,   
-    sum(total_accounts)                                         AS total_accounts_check   
+    count_if(paid_accounts > 0 AND paid_accounts = total_accounts) AS fully_paid_users
 FROM per_trader

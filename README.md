@@ -14,7 +14,7 @@ For contract architecture and the full decoded-table reference, see `../CLAUDE.m
 |---|---|---|---|
 | `headline_counter.sql` | Counters | Unique traders + paid/free/total eval account split | `unique_traders`, `paid_eval_accounts`, `free_eval_accounts`, `total_eval_accounts` |
 | `eval_accs.sql` | Counter + line chart | Daily new eval accounts and traders, with running cumulative totals | `day`, `new_eval_accounts`, `cumulative_eval_accounts`, `new_traders`, `cumulative_unique_traders` |
-| `eval_passing_rate.sql` | Counter | Eval → pass conversion rate | `eval_accounts`, `funded_accounts`, `pass_rate_pct` |
+| `eval_passing_rate.sql` | Counter | Eval → pass conversion rate | `eval_accounts`, `passed_evals`, `pass_rate_pct` |
 | `onchain_rules.sql` | Table | Current eval risk/profit parameters, as written on-chain | `daily_drawdown_pct`, `max_drawdown_pct`, `profit_target_pct` |
 | `query_paid_vs_free_users.sql` | Counters | Trader-level payment segmentation (paid / free / mixed) | `total_users`, `paid_users`, `free_users`, `mixed_users`, `fully_paid_users` |
 
@@ -22,10 +22,10 @@ For contract architecture and the full decoded-table reference, see `../CLAUDE.m
 
 | File | Widget | Purpose | Key Output Columns |
 |---|---|---|---|
-| `revenue.sql` | Table | All-time assessment revenue, grouped by fee tier | `amount_usdc`, `purchased_accounts`, `tier_revenue_usdc`, `grand_total_revenue_usdc` |
-| `revenue_24h.sql` | Counter | Assessment revenue, trailing 24 hours | `revenue_usdc_24h` |
-| `revenue_7d.sql` | Counter | Assessment revenue, trailing 7 days | `revenue_usdc_last_week` |
-| `revenue_30d.sql` | Counter | Assessment revenue, trailing 30 days | `revenue_usdc_last_week` |
+| `revenue.sql` | Table | Verified assessment revenue, grouped by fee tier | `amount_usdc`, `purchased_accounts`, `tier_revenue_usdc`, `grand_total_revenue_usdc` |
+| `revenue_24h.sql` | Counter | Verified assessment revenue, trailing 24 hours | `revenue_usdc_24h` |
+| `revenue_7d.sql` | Counter | Verified assessment revenue, trailing 7 days | `revenue_usdc_7d` |
+| `revenue_30d.sql` | Counter | Verified assessment revenue, trailing 30 days | `revenue_usdc_30d` |
 
 ### Payouts & Treasury
 
@@ -42,7 +42,7 @@ For contract architecture and the full decoded-table reference, see `../CLAUDE.m
 
 | Table | Description | Used By |
 |---|---|---|
-| `hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated` | Eval account creation events — `trader`, `evalAccountId`, `assessmentFee`, drawdown/profit-target params | `headline_counter`, `eval_accs`, `eval_passing_rate`, `onchain_rules`, `query_paid_vs_free_users`, `revenue*` (trader universe) |
+| `hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated` | Eval account creation events — `trader`, `evalAccountId`, `assessmentFee`, drawdown/profit-target params | `headline_counter`, `eval_accs`, `eval_passing_rate`, `onchain_rules`, `query_paid_vs_free_users`, `revenue*` (rank-pairing join) |
 | `hypernova_arbitrum.tradingaccounts_evt_evalpassed` | Eval-passed events | `eval_passing_rate` |
 | `hypernova_arbitrum.tradingaccounts_call_requestpayout` | Decoded `requestPayout` calls — includes the signed `_deadline` parameter | `payouts_latency` |
 | `hypernova_arbitrum.vault_evt_payoutprocessed` | Payout settlement events — `trader`, `traderAmount`, `protocolAmount` | `profit-split`, `proof_of_payouts` |
@@ -57,25 +57,31 @@ For contract architecture and the full decoded-table reference, see `../CLAUDE.m
 
 The contract writes `assessmentFee` (the list price) onto **every** eval account, including ones granted for free during closed beta/alpha. There is no on-chain "paid" flag, so payment must be reconstructed by matching USDC transfers.
 
-**Method** (`headline_counter.sql`, `query_paid_vs_free_users.sql`):
+Two variants of this verification are used in this folder:
+
+**Aggregate cap** (`headline_counter.sql`, `query_paid_vs_free_users.sql`):
 
 1. Group USDC transfers to the Hypernova payment address by `(sender, amount)` → `n_payments`
 2. Group eval accounts by `(trader, assessmentFee)` → `n_accounts`
 3. Left-join on `(trader = sender, assessmentFee = amount)`
 4. `paid = LEAST(n_payments, n_accounts)` — one payment backs at most one account, one account needs exactly one payment
 
-This is a conservative 1:1 cap, not a precise per-account match (it doesn't determine *which* specific account a payment funded — see `../metrics_reference/metrics_definitions.md` for the rank-pairing variant used when per-account attribution matters).
+This produces correct **totals** but doesn't determine *which specific* account a payment funded.
 
-### 3.2 Revenue: Verified vs. Raw
+**Rank-pairing** (`revenue.sql`, `revenue_24h.sql`, `revenue_7d.sql`, `revenue_30d.sql`):
 
-**This folder uses two different revenue methodologies that disagree by design:**
+1. Number each USDC transfer per `(sender, amount)` chronologically: `ROW_NUMBER() OVER (PARTITION BY "from", value ORDER BY evt_block_time) AS k`
+2. Number each eval account per `(trader, assessmentFee)` chronologically: `ROW_NUMBER() OVER (PARTITION BY trader, assessmentFee ORDER BY evt_block_time) AS k`
+3. `INNER JOIN` on `(trader = sender, assessmentFee = amount, payments.k = accounts.k)`
+4. Only matched rows survive — orphan payments and duplicates are excluded
 
-| | Method | Files |
-|---|---|---|
-| **Verified** | Caps paid accounts via §3.1's `LEAST()` logic — excludes free grants | `headline_counter.sql`, `query_paid_vs_free_users.sql` |
-| **Raw** | Sums *every* USDC transfer from a known eval trader to the payment address — no dedup, no orphan exclusion | `revenue.sql`, `revenue_24h.sql`, `revenue_7d.sql`, `revenue_30d.sql` |
+Both methods produce **identical totals** (`SUM(purchased_accounts)` from `revenue.sql` = `paid_eval_accounts` from `headline_counter.sql`). The rank-pairing method additionally identifies *which* payment backs *which* account, which allows windowed revenue queries (24h/7d/30d) to correctly attribute payments to time windows.
 
-The raw method will overstate revenue whenever an orphan or duplicate payment exists (a trader paid twice for one account, or paid but the account creation tx failed). See §5 for current impact.
+### 3.2 Revenue Methodology
+
+**All revenue queries in this folder use verified methodology** — orphan payments (paid but no matching account) and duplicate payments (paid twice for one account slot) are excluded. Every `revenue*.sql` query uses the rank-pairing variant (§3.1) and reconciles exactly with the headline counters.
+
+For the windowed queries (`revenue_24h.sql`, `revenue_7d.sql`, `revenue_30d.sql`), the full payment history is scanned to build correct rank assignments, then the final output is filtered to payments landing within the trailing window. This is required for rank-pairing correctness — windowing the input would shift rank assignments.
 
 ### 3.3 Payout Latency
 
@@ -91,7 +97,7 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 
 ### 3.4 Treasury Reconstruction
 
-`proof_of_funds.sql` has no direct balance table to query, so it nets every inbound/outbound USDC transfer to the Vault and Treasury wallets since a fixed cutoff date and sums to a running balance. This is a flow-based reconstruction, not a balance snapshot — see §5 for the cutoff-date caveat.
+`proof_of_funds.sql` has no direct balance table to query, so it nets every inbound/outbound USDC transfer to the Vault and Treasury wallets since platform launch (2026-03-25) and sums to a running balance. This is a flow-based reconstruction, not a balance snapshot — it's only as complete as the chosen cutoff, which here covers the full life of the platform.
 
 ---
 
@@ -101,11 +107,11 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 |---|---|---|
 | `unique_traders` | Distinct wallets that created ≥1 eval account | `COUNT(DISTINCT trader)` on `evalaccountcreated` |
 | `paid_eval_accounts` / `free_eval_accounts` | Eval accounts with / without a verified matching payment | §3.1 |
-| `pass_rate_pct` | Share of eval accounts that progressed to `EvalPassed` | `evalpassed events / evalaccountcreated events × 100` |
+| `pass_rate_pct` | Share of eval accounts that progressed to `EvalPassed` | `passed_evals / eval_accounts × 100` |
 | `daily_drawdown_pct` / `max_drawdown_pct` / `profit_target_pct` | Current eval risk/profit rules | Raw on-chain value (basis points) ÷ 100 |
 | `paid_users` / `free_users` / `mixed_users` / `fully_paid_users` | Trader-level payment segments | §3.1, rolled up per trader — `mixed` = has both a paid and a free account, order not considered |
-| `revenue_usdc_24h` / `_7d` / `_30d` | Raw USDC inflow from eval traders over the trailing window | §3.2 (raw method) |
-| `tier_revenue_usdc` / `grand_total_revenue_usdc` | Raw revenue grouped by fee tier | §3.2 (raw method) |
+| `revenue_usdc_24h` / `_7d` / `_30d` | Verified USDC revenue from eval purchases over the trailing window | §3.1 rank-pairing, windowed on payment time |
+| `tier_revenue_usdc` / `grand_total_revenue_usdc` | Verified revenue grouped by fee tier | §3.1 rank-pairing, all-time |
 | `min_sec` / `max_sec` / `avg_sec` (payout latency) | Sign-to-payout latency distribution | §3.3 |
 | `total_trader_usdc` / `total_protocol_usdc` | Gross USDC split between trader payouts and protocol take | `SUM(traderAmount)`, `SUM(protocolAmount)` on `payoutprocessed` |
 | `trader_pct` / `protocol_pct` | Each side's share of gross payout volume | `side_usdc / (trader_usdc + protocol_usdc) × 100` |
@@ -115,12 +121,16 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 
 ## 5. Known Limitations
 
-- **Revenue methodology mismatch:** the headline counters and user-segmentation queries report *verified* revenue/paid-account counts; the four `revenue*.sql` queries report *raw* transfer sums. They will not reconcile exactly. Do not present both on the same dashboard view without labeling the difference.
-- **`revenue_7d.sql` and `revenue_30d.sql` share the output alias `revenue_usdc_last_week`** despite covering different windows (7d vs 30d) — a naming artifact to be aware of when wiring widgets, not a logic error.
-- **`eval_passing_rate.sql`'s `funded_accounts` column counts `EvalPassed` events**, not `FundedAccountCreated` events. Numerically equivalent today (1:1 in current data) but the alias is a misnomer if that 1:1 relationship ever changes.
-- **`proof_of_funds.sql` nets flows from 2026-04-01**, while the platform launched 2026-03-25. Any Vault/Treasury balance accrued in that 7-day gap is not captured — the reported balance is a lower bound, not an exact reserve figure.
-- **`onchain_rules.sql` references the table as `TradingAccounts_evt_EvalAccountCreated`** (mixed case) rather than the canonical lowercase form used elsewhere in this folder. DuneSQL resolves it correctly, but it's an inconsistency if this query is used as a template.
-- **`mixed_users` (query_paid_vs_free_users.sql) is order-agnostic** — it flags a trader as mixed regardless of whether the free or the paid account came first. See `../users/08_free_to_paid_upgraders.sql` for the order-aware "upgrader" variant (free first, paid later).
+- **`mixed_users` (query_paid_vs_free_users.sql) is order-agnostic** — it flags a trader as mixed regardless of whether the free or the paid account came first. This is intentional scope, not a defect: see `../users/08_free_to_paid_upgraders.sql` for the order-aware "upgrader" variant (free first, paid later).
+
+### Resolved
+
+The following were identified and fixed on 2026-06-16 — kept here for change-log visibility:
+
+- **`query_paid_vs_free_users.sql` dropped two undocumented columns, `paid_accounts_check` and `total_accounts_check`.** These were dev-time reconciliation leftovers (sums used to sanity-check the aggregate-cap math while building the query) that were never referenced in either doc and had no place in a production widget output. Removed; the query now returns exactly the 5 documented columns.
+- **`eval_passing_rate.sql`'s output column was renamed `funded_accounts` → `passed_evals`.** The old name implied a count of `FundedAccountCreated` events; the query actually counts `EvalPassed` events. Fixed by renaming the alias to match what it counts. *If this query is already wired to a live Dune dashboard widget under the old column name, the widget binding needs to be re-pointed to `passed_evals`.*
+- **`proof_of_funds.sql`'s tracking cutoff was moved from 2026-04-01 to 2026-03-25** (platform launch). The query previously missed the first week of Vault/Treasury USDC flows; it now covers the platform's full lifetime, so the reported balance is exact rather than a lower bound.
+- **`onchain_rules.sql`'s table reference was lowercased** from `TradingAccounts_evt_EvalAccountCreated` to `tradingaccounts_evt_evalaccountcreated`, matching the canonical form used elsewhere in this folder. Behavior is unchanged (DuneSQL identifiers are case-insensitive) — this was a style fix only.
 
 ---
 
@@ -132,7 +142,7 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 | USDC (Arbitrum native) | `0xaf88d065e77c8cc2239327c5edb3a432268e5831` (6 decimals) |
 | Vault contract/wallet | `0x920973eEBffd3bF7da14dd9fB52Bd3BeA1664c67` |
 | Treasury wallet | `0x43C5F0a81d538a527DbF35D27faa583AC7FADA07` |
-| Platform launch | 2026-03-25 |
+| Platform launch / partition-pruning & proof-of-funds cutoff | 2026-03-25 |
 | EIP-712 payout deadline TTL | 600 seconds (constant) |
 
 ---
@@ -141,5 +151,5 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 
 - Header comment block in the `payouts_latency.sql` style: a `====` banner, one-line title (`Hypernova: <Name>`), then a short description of what's computed and how, including any non-obvious methodology or caveats.
 - Filter on partition columns (`evt_block_date`, `evt_block_time`) wherever a table supports it — prunes the scan and reduces query cost.
-- State explicitly whether a revenue/account metric is **verified** (§3.1) or **raw** (§3.2) — the two are not interchangeable on this dashboard.
+- All revenue/paid-account metrics must use the **verified** methodology (§3.1) — rank-pairing for per-payment attribution, aggregate cap for totals-only. Never sum raw transfers without orphan/duplicate exclusion.
 - Cross-reference the broader analysis docs in the parent directory (`../payout_flow_analysis.md`, `../hypernova_arbitrum_tables.md`, `../users/README.md`) rather than re-deriving methodology inline.

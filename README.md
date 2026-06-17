@@ -4,6 +4,34 @@
  **Chain:** Arbitrum.
   **Schema:** `hypernova_arbitrum`. 
 
+## Queries
+
+| # | File | Dune ID | Description |
+|---|------|---------|-------------|
+| Q1 | [`headline_counter.sql`](headline_counter.sql) | — | Unique traders + paid/free/total eval account split |
+| Q2 | [`eval_accs.sql`](eval_accs.sql) | — | Daily new eval accounts and traders with cumulative totals |
+| Q3 | [`eval_passing_rate.sql`](eval_passing_rate.sql) | — | Eval → pass conversion rate |
+| Q4 | [`onchain_rules.sql`](onchain_rules.sql) | — | Current on-chain drawdown/profit-target rules as % |
+| Q5 | [`query_paid_vs_free_users.sql`](query_paid_vs_free_users.sql) | — | Trader-level payment segmentation (paid / free / mixed) |
+| Q6 | [`revenue.sql`](revenue.sql) | — | Verified assessment revenue by fee tier (all-time) |
+| Q7 | [`revenue_24h.sql`](revenue_24h.sql) | — | Verified assessment revenue, trailing 24 hours |
+| Q8 | [`revenue_7d.sql`](revenue_7d.sql) | — | Verified assessment revenue, trailing 7 days |
+| Q9 | [`revenue_30d.sql`](revenue_30d.sql) | — | Verified assessment revenue, trailing 30 days |
+| Q10 | [`payouts_latency.sql`](payouts_latency.sql) | — | Off-chain payout latency (min / max / avg seconds) |
+| Q11 | [`profit-split.sql`](profit-split.sql) | — | Trader vs. protocol gross payout split |
+| Q12 | [`proof_of_payouts.sql`](proof_of_payouts.sql) | — | 20 most recent payouts (public activity feed) |
+| Q13 | [`proof_of_funds.sql`](proof_of_funds.sql) | — | Reconstructed Vault & Treasury USDC balances |
+| Q14 | [`registered_no_eval.sql`](registered_no_eval.sql) | — | Wallets registered but never started an eval |
+
+## Key Addresses
+
+| Role | Address |
+|------|---------|
+| Payment address | `0x924e3Ed4fc2130b103470270B403b2A4ac808240` |
+| Vault contract / wallet | `0x920973eEBffd3bF7da14dd9fB52Bd3BeA1664c67` |
+| Treasury wallet | `0x43C5F0a81d538a527DbF35D27faa583AC7FADA07` |
+| USDC (Arbitrum native, 6 dec) | `0xaf88d065e77c8cc2239327c5edb3a432268e5831` |
+
 For the full decoded-table column reference, see `../hypernova_arbitrum_tables.md`. Contract source is in `trading_accounts.sol` and `vault.sol`.
 
 ---

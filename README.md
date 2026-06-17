@@ -9,19 +9,19 @@
 | # | File | Dune ID | Description |
 |---|------|---------|-------------|
 | Q1 | [`headline_counter.sql`](headline_counter.sql) | [`query`](https://dune.com/queries/7708691/11668715)  | Unique traders + paid/free/total eval account split |
-| Q2 | [`eval_accs.sql`](eval_accs.sql) | https://dune.com/queries/7650943/11604976| Daily new eval accounts and traders with cumulative totals |
-| Q3 | [`eval_passing_rate.sql`](eval_passing_rate.sql) | https://dune.com/queries/7659631/11613960 | Eval → pass conversion rate |
-| Q4 | [`onchain_rules.sql`](onchain_rules.sql) | https://dune.com/queries/7650324/11604897 | Current on-chain drawdown/profit-target rules as % |
+| Q2 | [`eval_accs.sql`](eval_accs.sql) | [`query`](https://dune.com/queries/7650943/11604976) | Daily new eval accounts and traders with cumulative totals |
+| Q3 | [`eval_passing_rate.sql`](eval_passing_rate.sql) | [`query`](https://dune.com/queries/7659631/11613960) | Eval → pass conversion rate |
+| Q4 | [`onchain_rules.sql`](onchain_rules.sql) | [`query`](https://dune.com/queries/7650324/11604897) | Current on-chain drawdown/profit-target rules as % |
 | Q5 | [`query_paid_vs_free_users.sql`](query_paid_vs_free_users.sql) | — | Trader-level payment segmentation (paid / free / mixed) |
-| Q6 | [`revenue.sql`](revenue.sql) | https://dune.com/queries/7682345/11639270 | Verified assessment revenue by fee tier (all-time) |
-| Q7 | [`revenue_24h.sql`](revenue_24h.sql) | https://dune.com/queries/7703347/11662520 | Verified assessment revenue, trailing 24 hours |
-| Q8 | [`revenue_7d.sql`](revenue_7d.sql) | https://dune.com/queries/7708415/11668317 | Verified assessment revenue, trailing 7 days |
-| Q9 | [`revenue_30d.sql`](revenue_30d.sql) | https://dune.com/queries/7708439/11668365 | Verified assessment revenue, trailing 30 days |
-| Q10 | [`payouts_latency.sql`](payouts_latency.sql) | https://dune.com/queries/7660463/11615817 | Off-chain payout latency (min / max / avg seconds) |
-| Q11 | [`profit-split.sql`](profit-split.sql) | https://dune.com/queries/7659405/11613779 | Trader vs. protocol gross payout split |
-| Q12 | [`proof_of_payouts.sql`](proof_of_payouts.sql) | https://dune.com/queries/7659634/11613880 | 20 most recent payouts (public activity feed) |
+| Q6 | [`revenue.sql`](revenue.sql) | [`query`](https://dune.com/queries/7682345/11639270) | Verified assessment revenue by fee tier (all-time) |
+| Q7 | [`revenue_24h.sql`](revenue_24h.sql) | [`query`](https://dune.com/queries/7703347/11662520) | Verified assessment revenue, trailing 24 hours |
+| Q8 | [`revenue_7d.sql`](revenue_7d.sql) | [`query`](https://dune.com/queries/7708415/11668317) | Verified assessment revenue, trailing 7 days |
+| Q9 | [`revenue_30d.sql`](revenue_30d.sql) | [`query`](https://dune.com/queries/7708439/11668365) | Verified assessment revenue, trailing 30 days |
+| Q10 | [`payouts_latency.sql`](payouts_latency.sql) | [`query`](https://dune.com/queries/7660463/11615817) | Off-chain payout latency (min / max / avg seconds) |
+| Q11 | [`profit-split.sql`](profit-split.sql) | [`query`](https://dune.com/queries/7659405/11613779) | Trader vs. protocol gross payout split |
+| Q12 | [`proof_of_payouts.sql`](proof_of_payouts.sql) | [`query`](https://dune.com/queries/7659634/11613880) | 20 most recent payouts (public activity feed) |
 | Q13 | [`proof_of_funds.sql`](proof_of_funds.sql) |  [`query`](https://dune.com/queries/7650637/11604660) | Reconstructed Vault & Treasury USDC balances |
-| Q14 | [`registered_no_eval.sql`](registered_no_eval.sql) | — | Wallets registered but never started an eval | TBC after the launch 
+| Q14 | [`registered_no_eval.sql`](registered_no_eval.sql) | [`query`](https://dune.com/queries/7740284) | Wallets registered but never started an eval | TBC after the launch 
 
 ## Key Addresses
 

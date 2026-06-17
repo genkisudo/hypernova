@@ -15,7 +15,7 @@ WITH payments AS (
     SELECT
         "from" AS trader,
         value  AS amount,
-        count(*) AS n_payments
+        COUNT(*) AS n_payments
     FROM erc20_arbitrum.evt_Transfer
     WHERE "to" = 0x924e3Ed4fc2130b103470270B403b2A4ac808240               -- Hypernova payment address
       AND contract_address = 0xaf88d065e77c8cc2239327c5edb3a432268e5831  -- USDC (Arbitrum native)
@@ -27,17 +27,17 @@ accounts AS (
     SELECT
         trader,
         assessmentFee AS amount,
-        count(*) AS n_accounts
+        COUNT(*) AS n_accounts
     FROM hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated
     GROUP BY 1, 2
 )
 
 SELECT
-    count(DISTINCT a.trader)                                  AS unique_traders,
-    sum(least(coalesce(p.n_payments, 0), a.n_accounts))       AS paid_eval_accounts,
-    sum(a.n_accounts)
-      - sum(least(coalesce(p.n_payments, 0), a.n_accounts))   AS free_eval_accounts,
-    sum(a.n_accounts)                                         AS total_eval_accounts
+    COUNT(DISTINCT a.trader)                                  AS unique_traders,
+    SUM(LEAST(COALESCE(p.n_payments, 0), a.n_accounts))       AS paid_eval_accounts,
+    SUM(a.n_accounts)
+      - SUM(LEAST(COALESCE(p.n_payments, 0), a.n_accounts))   AS free_eval_accounts,
+    SUM(a.n_accounts)                                         AS total_eval_accounts
 FROM accounts a
 LEFT JOIN payments p
   ON p.trader = a.trader

@@ -8,22 +8,21 @@
 -- Returns the most recent occurrence of each distinct rule combination, so
 -- if multiple rule tiers are active simultaneously, each appears once.
 
-with ranked as (
-    select
-        concat(cast(dailyDrawdownLimit / 100 as varchar), '%') as daily_drawdown_pct
-        , concat(cast(maxDrawdownLimit / 100 as varchar), '%') as max_drawdown_pct
-        , concat(cast(profitTarget / 100 as varchar), '%') as profit_target_pct
-        , row_number() over (
-            partition by dailyDrawdownLimit, maxDrawdownLimit, profitTarget
-            order by evt_block_time desc
-        ) as rn
-    from hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated
+WITH ranked AS (
+    SELECT
+        CONCAT(CAST(dailyDrawdownLimit / 100 AS varchar), '%') AS daily_drawdown_pct,
+        CONCAT(CAST(maxDrawdownLimit / 100 AS varchar), '%') AS max_drawdown_pct,
+        CONCAT(CAST(profitTarget / 100 AS varchar), '%') AS profit_target_pct,
+        ROW_NUMBER() OVER (
+            PARTITION BY dailyDrawdownLimit, maxDrawdownLimit, profitTarget
+            ORDER BY evt_block_time DESC
+        ) AS rn
+    FROM hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated
 )
 
-select
-    daily_drawdown_pct
-    , max_drawdown_pct
-    , profit_target_pct
-from ranked
-where rn <= 1
-
+SELECT
+    daily_drawdown_pct,
+    max_drawdown_pct,
+    profit_target_pct
+FROM ranked
+WHERE rn <= 1

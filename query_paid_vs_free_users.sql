@@ -24,7 +24,7 @@ payments AS (
     SELECT
         "from" AS trader,
         value  AS amount,            -- raw micro-USDC, exact integer match
-        count(*) AS n_pay
+        COUNT(*) AS n_pay
     FROM erc20_arbitrum.evt_Transfer
     WHERE "to" = 0x924e3Ed4fc2130b103470270B403b2A4ac808240               -- Hypernova payment address
       AND contract_address = 0xaf88d065e77c8cc2239327c5edb3a432268e5831  -- USDC (Arbitrum native)
@@ -36,7 +36,7 @@ accounts AS (
     SELECT
         trader,
         assessmentFee AS amount,
-        count(*) AS n_acc
+        COUNT(*) AS n_acc
     FROM hypernova_arbitrum.tradingaccounts_evt_evalaccountcreated
     GROUP BY 1, 2
 ),
@@ -47,8 +47,8 @@ accounts AS (
 per_trader AS (
     SELECT
         a.trader,
-        sum(a.n_acc)                                       AS total_accounts,
-        sum(least(coalesce(p.n_pay, 0), a.n_acc))          AS paid_accounts
+        SUM(a.n_acc)                                       AS total_accounts,
+        SUM(LEAST(COALESCE(p.n_pay, 0), a.n_acc))          AS paid_accounts
     FROM accounts a
     LEFT JOIN payments p
       ON p.trader = a.trader AND p.amount = a.amount
@@ -56,9 +56,9 @@ per_trader AS (
 )
 
 SELECT
-    count(*)                                                    AS total_users,
-    count_if(paid_accounts > 0)                                 AS paid_users,
-    count_if(paid_accounts = 0)                                 AS free_users,
-    count_if(paid_accounts > 0 AND paid_accounts < total_accounts) AS mixed_users,
-    count_if(paid_accounts > 0 AND paid_accounts = total_accounts) AS fully_paid_users
+    COUNT(*)                                                    AS total_users,
+    COUNT_IF(paid_accounts > 0)                                 AS paid_users,
+    COUNT_IF(paid_accounts = 0)                                 AS free_users,
+    COUNT_IF(paid_accounts > 0 AND paid_accounts < total_accounts) AS mixed_users,
+    COUNT_IF(paid_accounts > 0 AND paid_accounts = total_accounts) AS fully_paid_users
 FROM per_trader

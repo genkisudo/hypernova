@@ -13,9 +13,9 @@
   -- Drift alarm: ttl_min/ttl_max ≈ [592, 599]. 
   
   SELECT
-    count(*) AS payouts,
-    min(600 - (_deadline - CAST(to_unixtime(call_block_time) AS double))) AS min_sec,
-    max(600 - (_deadline - CAST(to_unixtime(call_block_time) AS double))) AS max_sec,
-    avg(600 - (_deadline - CAST(to_unixtime(call_block_time) AS double))) AS avg_sec
+    COUNT(*) AS payouts,
+    MIN(600 - (_deadline - CAST(TO_UNIXTIME(call_block_time) AS double))) AS min_sec,
+    MAX(600 - (_deadline - CAST(TO_UNIXTIME(call_block_time) AS double))) AS max_sec,
+    AVG(600 - (_deadline - CAST(TO_UNIXTIME(call_block_time) AS double))) AS avg_sec
   FROM hypernova_arbitrum.tradingaccounts_call_requestpayout
-  WHERE call_success = true
+  WHERE call_success = TRUE

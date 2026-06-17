@@ -15,19 +15,19 @@ WITH events AS (
 ),
 
 daily AS (
-    SELECT day, count(distinct evalAccountId) AS new_eval_accounts
+    SELECT day, COUNT(DISTINCT evalAccountId) AS new_eval_accounts
     FROM events
     GROUP BY day
 ),
 
 trader_first AS (
-    SELECT trader, min(day) AS first_day
+    SELECT trader, MIN(day) AS first_day
     FROM events
     GROUP BY trader
 ),
 
 new_traders AS (
-    SELECT first_day AS day, count(*) AS new_traders
+    SELECT first_day AS day, COUNT(*) AS new_traders
     FROM trader_first
     GROUP BY first_day
 )
@@ -35,9 +35,9 @@ new_traders AS (
 SELECT
     d.day,
     d.new_eval_accounts,
-    sum(d.new_eval_accounts) OVER (ORDER BY d.day) AS cumulative_eval_accounts,
-    coalesce(t.new_traders, 0) AS new_traders,
-    sum(coalesce(t.new_traders, 0)) OVER (ORDER BY d.day) AS cumulative_unique_traders
+    SUM(d.new_eval_accounts) OVER (ORDER BY d.day) AS cumulative_eval_accounts,
+    COALESCE(t.new_traders, 0) AS new_traders,
+    SUM(COALESCE(t.new_traders, 0)) OVER (ORDER BY d.day) AS cumulative_unique_traders
 FROM daily d
 LEFT JOIN new_traders t ON t.day = d.day
 ORDER BY d.day DESC

@@ -20,7 +20,7 @@
 | Q10 | [`payouts_latency.sql`](payouts_latency.sql) | — | Off-chain payout latency (min / max / avg seconds) |
 | Q11 | [`profit-split.sql`](profit-split.sql) | — | Trader vs. protocol gross payout split |
 | Q12 | [`proof_of_payouts.sql`](proof_of_payouts.sql) | — | 20 most recent payouts (public activity feed) |
-| Q13 | [`proof_of_funds.sql`](proof_of_funds.sql) | — | Reconstructed Vault & Treasury USDC balances |
+| Q13 | [`proof_of_funds.sql`](proof_of_funds.sql) |  [`query`](dune.com/queries/7650637/11604660) | Reconstructed Vault & Treasury USDC balances |
 | Q14 | [`registered_no_eval.sql`](registered_no_eval.sql) | — | Wallets registered but never started an eval |
 
 ## Key Addresses
@@ -291,25 +291,9 @@ The following were identified and fixed on 2026-06-16 — kept here for change-l
 
 ---
 
-## 7. Reference Constants
+### 📊 Custom Data Analytics
+**Need a custom, high-signal data narrative?** I build world-class Dune dashboards tailored specifically to your protocol's brand and metrics. 
 
-| Constant | Value |
-|---|---|
-| Hypernova payment address | `0x924e3Ed4fc2130b103470270B403b2A4ac808240` |
-| USDC (Arbitrum native) | `0xaf88d065e77c8cc2239327c5edb3a432268e5831` (6 decimals) |
-| Vault contract/wallet | `0x920973eEBffd3bF7da14dd9fB52Bd3BeA1664c67` |
-| Treasury wallet | `0x43C5F0a81d538a527DbF35D27faa583AC7FADA07` |
-| Platform launch / partition-pruning & proof-of-funds cutoff | 2026-03-25 |
-| EIP-712 payout deadline TTL | 600 seconds (constant) |
-| Vault `BPS_DENOMINATOR` | 10,000 |
+👉 **[DM for Dashboard Requests on X (Twitter)](https://x.com/genki_sudo132)**
 
 ---
-
-## 8. Conventions for New Queries
-
-- Header comment block in the `payouts_latency.sql` style: a `====` banner, one-line title (`Hypernova: <Name>`), then a short description of what's computed and how, including any non-obvious methodology or caveats.
-- Filter on partition columns (`evt_block_date`, `evt_block_time`) wherever a table supports it — prunes the scan and reduces query cost.
-- All revenue/paid-account metrics must use the **verified** methodology (§4.1) — rank-pairing for per-payment attribution, aggregate cap for totals-only. Never sum raw transfers without orphan/duplicate exclusion.
-- When filtering on enum columns (`status` in `evalstatusupdated` / `fundedstatusupdated`), use the integer values documented in §2.3, not string comparisons.
-- Divide equity and fee amounts by `1e6` for USDC; divide drawdown/profit-target values by `100` for percentages (see §2.4).
-- Cross-reference the broader analysis docs in the parent directory (`../payout_flow_analysis.md`, `../hypernova_arbitrum_tables.md`, `../users/README.md`) rather than re-deriving methodology inline.

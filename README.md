@@ -8,20 +8,20 @@
 
 | # | File | Dune ID | Description |
 |---|------|---------|-------------|
-| Q1 | [`headline_counter.sql`](headline_counter.sql) | — | Unique traders + paid/free/total eval account split |
-| Q2 | [`eval_accs.sql`](eval_accs.sql) | — | Daily new eval accounts and traders with cumulative totals |
-| Q3 | [`eval_passing_rate.sql`](eval_passing_rate.sql) | — | Eval → pass conversion rate |
-| Q4 | [`onchain_rules.sql`](onchain_rules.sql) | — | Current on-chain drawdown/profit-target rules as % |
+| Q1 | [`headline_counter.sql`](headline_counter.sql) | [`query`](https://dune.com/queries/7708691/11668715)  | Unique traders + paid/free/total eval account split |
+| Q2 | [`eval_accs.sql`](eval_accs.sql) | https://dune.com/queries/7650943/11604976| Daily new eval accounts and traders with cumulative totals |
+| Q3 | [`eval_passing_rate.sql`](eval_passing_rate.sql) | https://dune.com/queries/7659631/11613960 | Eval → pass conversion rate |
+| Q4 | [`onchain_rules.sql`](onchain_rules.sql) | https://dune.com/queries/7650324/11604897 | Current on-chain drawdown/profit-target rules as % |
 | Q5 | [`query_paid_vs_free_users.sql`](query_paid_vs_free_users.sql) | — | Trader-level payment segmentation (paid / free / mixed) |
-| Q6 | [`revenue.sql`](revenue.sql) | — | Verified assessment revenue by fee tier (all-time) |
-| Q7 | [`revenue_24h.sql`](revenue_24h.sql) | — | Verified assessment revenue, trailing 24 hours |
-| Q8 | [`revenue_7d.sql`](revenue_7d.sql) | — | Verified assessment revenue, trailing 7 days |
-| Q9 | [`revenue_30d.sql`](revenue_30d.sql) | — | Verified assessment revenue, trailing 30 days |
-| Q10 | [`payouts_latency.sql`](payouts_latency.sql) | — | Off-chain payout latency (min / max / avg seconds) |
-| Q11 | [`profit-split.sql`](profit-split.sql) | — | Trader vs. protocol gross payout split |
-| Q12 | [`proof_of_payouts.sql`](proof_of_payouts.sql) | — | 20 most recent payouts (public activity feed) |
-| Q13 | [`proof_of_funds.sql`](proof_of_funds.sql) |  [`query`](dune.com/queries/7650637/11604660) | Reconstructed Vault & Treasury USDC balances |
-| Q14 | [`registered_no_eval.sql`](registered_no_eval.sql) | — | Wallets registered but never started an eval |
+| Q6 | [`revenue.sql`](revenue.sql) | https://dune.com/queries/7682345/11639270 | Verified assessment revenue by fee tier (all-time) |
+| Q7 | [`revenue_24h.sql`](revenue_24h.sql) | https://dune.com/queries/7703347/11662520 | Verified assessment revenue, trailing 24 hours |
+| Q8 | [`revenue_7d.sql`](revenue_7d.sql) | https://dune.com/queries/7708415/11668317 | Verified assessment revenue, trailing 7 days |
+| Q9 | [`revenue_30d.sql`](revenue_30d.sql) | https://dune.com/queries/7708439/11668365 | Verified assessment revenue, trailing 30 days |
+| Q10 | [`payouts_latency.sql`](payouts_latency.sql) | https://dune.com/queries/7660463/11615817 | Off-chain payout latency (min / max / avg seconds) |
+| Q11 | [`profit-split.sql`](profit-split.sql) | https://dune.com/queries/7659405/11613779 | Trader vs. protocol gross payout split |
+| Q12 | [`proof_of_payouts.sql`](proof_of_payouts.sql) | https://dune.com/queries/7659634/11613880 | 20 most recent payouts (public activity feed) |
+| Q13 | [`proof_of_funds.sql`](proof_of_funds.sql) |  [`query`](https://dune.com/queries/7650637/11604660) | Reconstructed Vault & Treasury USDC balances |
+| Q14 | [`registered_no_eval.sql`](registered_no_eval.sql) | — | Wallets registered but never started an eval | TBC after the launch 
 
 ## Key Addresses
 
@@ -98,40 +98,7 @@ Hypernova runs on two contracts deployed on Arbitrum. Both are the authoritative
 
 ### 2.3 State Machines
 
-**EvalStatus** (stored on `EvalAccount.evalStatus`; emitted in `EvalStatusUpdated`):
-
-```
-                    passEval() [admin]
-        ┌───────────────────────────────────► PASSED
-        │
-  ACTIVE ──── updateEvalStatus() [admin] ───► SUSPENDED
-        │                                ───► FAILED
-        └──────────────────────────────────── CLOSED
-```
-
-Transitions are not enforced by the contract (except that PASSED requires `passEval`, not `updateEvalStatus`). The admin can move an account to any non-PASSED terminal status at will.
-
-Enum integer values in Dune decoded tables: `ACTIVE=0`, `PASSED=1`, `SUSPENDED=2`, `FAILED=3`, `CLOSED=4`
-
----
-
-**FundedStatus** (stored on `FundedAccount.fundedStatus`; emitted in `FundedStatusUpdated`):
-
-```
-  [created by passEval()]
-          │
-  AWAITING_SIGNATURE ──── acceptFundedAccount() [trader EIP-712] ──► ACTIVE
-          │                                                              │
-          └──── rejectFundedAccount() [trader] ──────────────────────► CLOSED
-                                                                         │
-                                              updateFundedStatus() [admin] ──► CLOSED
-                                                                            ──► SUSPENDED
-                                                                            ──► FAILED
-```
-
-Admin cannot set `NONE` or `AWAITING_SIGNATURE` via `updateFundedStatus`. An account in `AWAITING_SIGNATURE` can only exit via `acceptFundedAccount` or `rejectFundedAccount`.
-
-Enum integer values: `NONE=0`, `AWAITING_SIGNATURE=1`, `ACTIVE=2`, `CLOSED=3`, `SUSPENDED=4`, `FAILED=5`
+**EvalStatus** (stored on `EvalAccount.evalStatus`; emitted in `EvalStatusUpdated`)
 
 ### 2.4 Data Encoding
 
@@ -140,8 +107,6 @@ Enum integer values: `NONE=0`, `AWAITING_SIGNATURE=1`, `ACTIVE=2`, `CLOSED=3`, `
 | `assessmentFee`, `traderAmount`, `protocolAmount`, all equity values | Micro-USDC (6 decimals) | `÷ 1e6` for human-readable USDC |
 | `dailyDrawdownLimit`, `maxDrawdownLimit`, `profitTarget` | Basis points | `÷ 100` for percentage |
 | Vault `profitSplit`, per-trader `userBonusBps` | Basis points out of `BPS_DENOMINATOR` (10,000) | e.g., `8000 = 80%` |
-
-The Vault `profitSplit` is global. A per-trader `userBonusBps` set by admin is additive. Effective trader share = `(profitSplit + userBonusBps) / 10000`, capped at 100%.
 
 ### 2.5 Event → Dune Table Mapping
 
@@ -169,28 +134,6 @@ The decoded call table (`tradingaccounts_call_requestpayout`) is used — rather
 ### 2.6 Payout Execution Flow
 
 `requestPayout` and `processPayout` execute atomically in the same transaction — there is no asynchronous settlement step.
-
-```
-Trader signs EIP-712 Payout struct:
-  { trader, fundedAccountId, amount, nonce, deadline }
-          │
-          ▼
-Relayer calls TradingAccounts.requestPayout()
-  ├── Validates: signature, deadline, canWithdraw flag, ACTIVE status, amount ≤ profit
-  ├── Emits: PayoutRequested(trader, fundedAccountId, amount, nonce)
-  ├── Reduces equity by amount; sets canWithdraw = false
-  └── Calls Vault.processPayout(trader, amount, userBonusBps[trader])
-                │
-                ▼
-          Vault.processPayout()
-            ├── traderAmount = amount × (profitSplit + bonusBps) / 10000
-            ├── Transfers traderAmount USDC → trader wallet
-            └── Emits: PayoutProcessed(trader, traderAmount, amount − traderAmount)
-                        (protocol share stays in vault)
-```
-
-`protocolAmount` in `vault_evt_payoutprocessed` equals `amount − traderAmount` and is the primary protocol revenue signal used in `profit-split.sql`.
-
 ---
 
 ## 3. On-Chain Data Sources

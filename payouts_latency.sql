@@ -6,8 +6,8 @@
   -- On-chain, requestPayout → Vault.processPayout is atomic (same tx,
   -- trade_code.sol), so all latency is off-chain: EIP-712 signing →
   -- relayer submission. Only signing-time proxy is the signed `_deadline`,
-  -- set by the frontend as signing_time + 600s TTL (inferred: ttl is
-  -- 592–599s on all calls; pending eng confirmation). Hence:
+  -- set by the frontend as signing_time + 600s TTL (confirmed by Hypernova
+  -- engineering 2026-06-11; observed TTL drift 592–599s). Hence:
   --   latency_sec = 600 − (deadline − block_time)
   --
   -- Drift alarm: ttl_min/ttl_max ≈ [592, 599]. 

@@ -1,6 +1,8 @@
-# Hypernova — Dashboard Query Reference
+# Hypernova Dune Dashboard Query Reference
 
-Production DuneSQL queries powering the live Hypernova dashboard. **Chain:** Arbitrum. **Schema:** `hypernova_arbitrum`. Every query here is wired to a dashboard widget — this is not the exploratory/scratch layer (see `../` for analysis drafts and validation notes).
+ DuneSQL queries powering the live Hypernova dashboard. 
+ **Chain:** Arbitrum.
+  **Schema:** `hypernova_arbitrum`. 
 
 For the full decoded-table column reference, see `../hypernova_arbitrum_tables.md`. Contract source is in `trading_accounts.sol` and `vault.sol`.
 
@@ -12,11 +14,11 @@ For the full decoded-table column reference, see `../hypernova_arbitrum_tables.m
 
 | File | Widget | Purpose | Key Output Columns |
 |---|---|---|---|
-| `headline_counter.sql` | Counters | Unique traders + paid/free/total eval account split | `unique_traders`, `paid_eval_accounts`, `free_eval_accounts`, `total_eval_accounts` |
+| `headline_counter.sql` | Counters | Unique traders + paid/free/total eval account split + evals-per-trader | `unique_traders`, `paid_eval_accounts`, `free_eval_accounts`, `total_eval_accounts`, `avg_evals_per_trader` |
 | `eval_accs.sql` | Counter + line chart | Daily new eval accounts and traders, with running cumulative totals | `day`, `new_eval_accounts`, `cumulative_eval_accounts`, `new_traders`, `cumulative_unique_traders` |
 | `eval_passing_rate.sql` | Counter | Eval → pass conversion rate | `eval_accounts`, `passed_evals`, `pass_rate_pct` |
 | `onchain_rules.sql` | Table | Current eval risk/profit parameters, as written on-chain | `daily_drawdown_pct`, `max_drawdown_pct`, `profit_target_pct` |
-| `query_paid_vs_free_users.sql` | Counters | Trader-level payment segmentation (paid / free / mixed) | `total_users`, `paid_users`, `free_users`, `mixed_users`, `fully_paid_users` |
+| `query_paid_vs_free_users.sql` | Counters | Trader-level payment segmentation (paid / free / mixed) + account-level totals | `total_users`, `paid_users`, `free_users`, `mixed_users`, `fully_paid_users`, `paid_eval_accounts`, `free_eval_accounts`, `total_eval_accounts`, `ratio_free_who_purchased_pct` |
 
 ### Revenue
 
@@ -32,8 +34,8 @@ For the full decoded-table column reference, see `../hypernova_arbitrum_tables.m
 | File | Widget | Purpose | Key Output Columns |
 |---|---|---|---|
 | `payouts_latency.sql` | Counter | Sign-to-payout latency (EIP-712 deadline derived) | `payouts`, `min_sec`, `max_sec`, `avg_sec` |
-| `profit-split.sql` | Counters | Platform-wide payout totals and trader/protocol split | `total_trader_usdc`, `total_protocol_usdc`, `trader_pct`, `protocol_pct` |
-| `proof_of_payouts.sql` | Table | Recent payout activity feed (public-facing) | `payout_time`, `tx_hash`, `trader_wallet`, `usdc_payout` |
+| `profit-split.sql` | Counters | Platform-wide payout totals and trader/protocol split | `unique_traders`, `total_payouts`, `total_trader_usdc`, `total_protocol_usdc`, `total_gross_usdc`, `trader_pct`, `protocol_pct` |
+| `proof_of_payouts.sql` | Table | Recent payout activity feed (public-facing) | `source_vault`, `payout_time`, `tx_hash`, `trader_wallet`, `status`, `usdc_payout` |
 | `proof_of_funds.sql` | Table | Reconstructed Vault & Treasury USDC balances | `wallet`, `symbol`, `balance` |
 
 ---
@@ -232,9 +234,11 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 |---|---|---|
 | `unique_traders` | Distinct wallets that created ≥1 eval account | `COUNT(DISTINCT trader)` on `evalaccountcreated` |
 | `paid_eval_accounts` / `free_eval_accounts` | Eval accounts with / without a verified matching payment | §4.1 |
+| `avg_evals_per_trader` | Mean eval accounts created per unique trader | `total_eval_accounts / unique_traders` (`headline_counter.sql`) |
 | `pass_rate_pct` | Share of eval accounts that progressed to `EvalPassed` | `passed_evals / eval_accounts × 100` |
 | `daily_drawdown_pct` / `max_drawdown_pct` / `profit_target_pct` | Current eval risk/profit rules | Raw on-chain value (basis points) ÷ 100 |
 | `paid_users` / `free_users` / `mixed_users` / `fully_paid_users` | Trader-level payment segments | §4.1, rolled up per trader — `mixed` = has both a paid and a free account, order not considered |
+| `ratio_free_who_purchased_pct` | Share of users who hold ≥1 free account that also purchased ≥1 account | `mixed_users / (free_users + mixed_users) × 100`; order-agnostic free-to-paid rate |
 | `revenue_usdc_24h` / `_7d` / `_30d` | Verified USDC revenue from eval purchases over the trailing window | §4.1 rank-pairing, windowed on payment time |
 | `tier_revenue_usdc` / `grand_total_revenue_usdc` | Verified revenue grouped by fee tier | §4.1 rank-pairing, all-time |
 | `min_sec` / `max_sec` / `avg_sec` (payout latency) | Sign-to-payout latency distribution | §4.3 |
@@ -252,7 +256,7 @@ The 600-second offset is treated as constant; see `../payout_flow_analysis.md` f
 
 The following were identified and fixed on 2026-06-16 — kept here for change-log visibility:
 
-- **`query_paid_vs_free_users.sql` dropped two undocumented columns, `paid_accounts_check` and `total_accounts_check`.** These were dev-time reconciliation leftovers (sums used to sanity-check the aggregate-cap math while building the query) that were never referenced in either doc and had no place in a production widget output. Removed; the query now returns exactly the 5 documented columns.
+- **`query_paid_vs_free_users.sql` dropped two undocumented columns, `paid_accounts_check` and `total_accounts_check`.** These were dev-time reconciliation leftovers (sums used to sanity-check the aggregate-cap math while building the query) that were never referenced in either doc and had no place in a production widget output. Removed; the query now returns exactly the 6 documented columns (`total_users`, `paid_users`, `free_users`, `mixed_users`, `fully_paid_users`, `ratio_free_who_purchased_pct`).
 - **`eval_passing_rate.sql`'s output column was renamed `funded_accounts` → `passed_evals`.** The old name implied a count of `FundedAccountCreated` events; the query actually counts `EvalPassed` events. Fixed by renaming the alias to match what it counts. *If this query is already wired to a live Dune dashboard widget under the old column name, the widget binding needs to be re-pointed to `passed_evals`.*
 - **`proof_of_funds.sql`'s tracking cutoff was moved from 2026-04-01 to 2026-03-25** (platform launch). The query previously missed the first week of Vault/Treasury USDC flows; it now covers the platform's full lifetime, so the reported balance is exact rather than a lower bound.
 - **`onchain_rules.sql`'s table reference was lowercased** from `TradingAccounts_evt_EvalAccountCreated` to `tradingaccounts_evt_evalaccountcreated`, matching the canonical form used elsewhere in this folder. Behavior is unchanged (DuneSQL identifiers are case-insensitive) — this was a style fix only.

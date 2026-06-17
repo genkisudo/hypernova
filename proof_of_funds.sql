@@ -27,7 +27,7 @@ token_outflows AS (
     INNER JOIN tokens.erc20 AS tk
         ON t.contract_address = tk.contract_address
        AND tk.blockchain = 'arbitrum'
-    WHERE t.contract_address = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
+    WHERE t.contract_address = 0xaf88d065e77c8cc2239327c5edb3a432268e5831
       AND t.evt_block_date >= DATE '2026-03-25'
       AND t."from" IN (SELECT address FROM wallet_list)
 ),
@@ -42,7 +42,7 @@ token_inflows AS (
     INNER JOIN tokens.erc20 AS tk
         ON t.contract_address = tk.contract_address
        AND tk.blockchain = 'arbitrum'
-    WHERE t.contract_address = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
+    WHERE t.contract_address = 0xaf88d065e77c8cc2239327c5edb3a432268e5831
       AND t.evt_block_date >= DATE '2026-03-25'
       AND t."to" IN (SELECT address FROM wallet_list)
 ),

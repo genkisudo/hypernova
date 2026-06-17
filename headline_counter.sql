@@ -1,15 +1,16 @@
 -- ============================================================================
 -- Hypernova: Headline Counters — Traders & Eval Accounts (Paid vs Free)
 -- ============================================================================
--- Single row, four numbers, one Counter visualization per column:
+-- Single row, five numbers, one Counter visualization per column:
 --   unique_traders | paid_eval_accounts | free_eval_accounts | total_eval_accounts
+--   | avg_evals_per_trader (= total_eval_accounts / unique_traders)
 --
 -- Paid = backed by a real USDC payment to the Hypernova payment address.
 -- assessmentFee is only the list price (free beta grants have one too), so per
 -- (trader, price) the number of paid accounts = least(#payments, #accounts):
 -- a payment can back at most one account, an account needs one payment.
 --
--- Validated 2026-06-12: 246 paid + 161 free = 407 accounts, 247 traders.
+-- Validated 2026-06-12: 246 paid + 161 free = 407 accounts, 247 traders (figures as of that date; live totals are higher).
 
 WITH payments AS (
     SELECT
@@ -37,7 +38,9 @@ SELECT
     SUM(LEAST(COALESCE(p.n_payments, 0), a.n_accounts))       AS paid_eval_accounts,
     SUM(a.n_accounts)
       - SUM(LEAST(COALESCE(p.n_payments, 0), a.n_accounts))   AS free_eval_accounts,
-    SUM(a.n_accounts)                                         AS total_eval_accounts
+    SUM(a.n_accounts)                                         AS total_eval_accounts,
+    CAST(SUM(a.n_accounts) AS DOUBLE)
+      / NULLIF(COUNT(DISTINCT a.trader), 0)                   AS avg_evals_per_trader
 FROM accounts a
 LEFT JOIN payments p
   ON p.trader = a.trader

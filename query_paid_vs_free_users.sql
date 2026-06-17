@@ -56,9 +56,20 @@ per_trader AS (
 )
 
 SELECT
-    COUNT(*)                                                    AS total_users,
-    COUNT_IF(paid_accounts > 0)                                 AS paid_users,
-    COUNT_IF(paid_accounts = 0)                                 AS free_users,
-    COUNT_IF(paid_accounts > 0 AND paid_accounts < total_accounts) AS mixed_users,
-    COUNT_IF(paid_accounts > 0 AND paid_accounts = total_accounts) AS fully_paid_users
+    -- Trader-level counts (each wallet classified once)
+    COUNT(*)                                                                  AS total_users,
+    COUNT_IF(paid_accounts > 0)                                               AS paid_users,
+    COUNT_IF(paid_accounts = 0)                                               AS free_users,
+    COUNT_IF(paid_accounts > 0 AND paid_accounts < total_accounts)            AS mixed_users,
+    COUNT_IF(paid_accounts > 0 AND paid_accounts = total_accounts)            AS fully_paid_users,
+
+    -- Account-level counts (reconcile with headline_counter.sql)
+    SUM(paid_accounts)                                                        AS paid_eval_accounts,
+    SUM(total_accounts) - SUM(paid_accounts)                                  AS free_eval_accounts,
+    SUM(total_accounts)                                                       AS total_eval_accounts,
+
+    -- Ratio of free/granted users who purchased to ALL free/granted users (* 100.0 for percentage)
+    (CAST(COUNT_IF(paid_accounts > 0 AND paid_accounts < total_accounts) AS DOUBLE) * 100.0) /
+        NULLIF(COUNT_IF(paid_accounts < total_accounts), 0)                   AS ratio_free_who_purchased_pct
+
 FROM per_trader

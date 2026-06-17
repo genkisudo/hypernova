@@ -51,6 +51,23 @@ Per the query's own header comment, validated 2026-06-12: **246 paid + 161 free 
 
 ---
 
+## 2b. Average Evals per Trader
+
+| | |
+|---|---|
+| **Definition** | Mean number of eval accounts created per unique trader |
+| **Formula** | `avg_evals_per_trader = total_eval_accounts / unique_traders` |
+| **On-chain source** | `tradingaccounts_evt_evalaccountcreated` (both numerator and denominator) |
+| **Query file** | `headline_counter.sql` |
+
+### Notes
+
+- A ratio > 1 means traders create multiple eval accounts on average (retries / multiple challenge attempts). It is **not** a paid/free split — it counts all eval accounts regardless of payment status.
+- Computed as `CAST(SUM(n_accounts) AS DOUBLE) / NULLIF(COUNT(DISTINCT trader), 0)` — cast to double so the result is fractional (e.g. `1.73`, not floored to `1`), with a `NULLIF` zero-guard.
+- This is a **headline (all-time) snapshot**, distinct from the running `avg_evals_per_trader` referenced in `eval_accs.sql`'s comment (which is not actually emitted by that query — only the project-wide `query_7698969_eval_accounts.sql` outside this folder computes the day-by-day running version).
+
+---
+
 ## 3. Daily & Cumulative Eval Signups / Traders
 
 | | |
@@ -114,20 +131,30 @@ Returns the most recent occurrence of each **distinct** `(dailyDrawdownLimit, ma
 
 ### Segments
 
-| Segment | Definition |
+| Segment / column | Definition |
 |---|---|
 | `total_users` | Every trader in the eval-account universe |
 | `paid_users` | Has at least one paid eval account |
 | `free_users` | All eval accounts are grants (zero paid) |
 | `mixed_users` | Has both paid AND free accounts (subset of `paid_users`) |
 | `fully_paid_users` | All accounts are paid (= `paid_users` − `mixed_users`) |
+| `paid_eval_accounts` | Total eval accounts backed by a verified payment (account-level; reconciles with `headline_counter.sql`) |
+| `free_eval_accounts` | Total eval accounts with no matching payment (account-level) |
+| `total_eval_accounts` | All eval accounts (`paid + free`; reconciles with `headline_counter.sql`) |
+| `ratio_free_who_purchased_pct` | Share of users who hold at least one free account that also purchased at least one account — i.e., `mixed_users / (free_users + mixed_users) × 100` |
+
+### `ratio_free_who_purchased_pct` detail
+
+- **Numerator:** `COUNT_IF(paid_accounts > 0 AND paid_accounts < total_accounts)` — traders who have at least one paid account AND at least one free account (`mixed_users`).
+- **Denominator:** `COUNT_IF(paid_accounts < total_accounts)` — traders who have at least one free account (`free_users + mixed_users`). `NULLIF(..., 0)` guards against division by zero if no free accounts exist.
+- This is an **order-agnostic** free-to-paid conversion rate at the trader level. It answers "of everyone who ever received a free grant, what share also bought at least one account?" regardless of which came first. For the order-aware variant (free account must precede the paid one), see `../users/08_free_to_paid_upgraders.sql`.
 
 ### Notes
 
 - A mixed trader counts as a **paid user** in the headline split.
 - Wallets that paid but never created an account are excluded from the universe by construction (4 × $60 as of 2026-06-12, per the query's own comment).
 - **"Mixed" has no notion of order** — it only means the trader owns at least one of each, regardless of whether the free or the paid account came first.
-- The query returns exactly these 5 columns. (Prior to 2026-06-16 it also exposed `paid_accounts_check` and `total_accounts_check` — dev-time reconciliation sums never referenced by any doc — which have since been removed.)
+- The query returns exactly these 9 columns. (Prior to 2026-06-16 it also exposed `paid_accounts_check` and `total_accounts_check` — dev-time reconciliation sums never referenced by any doc — which have since been removed.)
 
 ---
 
@@ -257,6 +284,49 @@ There is no balance table available via Dune's decoding for these contracts, so 
 
 ---
 
+## 12. Registered Wallets With No Eval Account
+
+| | |
+|---|---|
+| **Definition** | Wallets that the admin registered on-chain (`UserAccountCreated`) but for which no eval account was ever created (`EvalAccountCreated`) |
+| **On-chain source** | Anti-join: `tradingaccounts_evt_useraccountcreated` NOT EXISTS in `tradingaccounts_evt_evalaccountcreated` |
+| **Query file** | `registered_no_eval.sql` |
+
+### Output columns
+
+| Column | Description |
+|---|---|
+| `trader` | Registered wallet address (`varbinary`) |
+| `registered_at` | `evt_block_time` of the `UserAccountCreated` event |
+| `registered_block` | Block number of registration |
+| `registration_tx` | Transaction hash of the `createUserAccount` call |
+
+### Why this state exists on-chain
+
+`createUserAccount` (admin-only) only sets `userExists[trader] = true` and emits `UserAccountCreated`. It never creates an eval account, and nothing in the contract forces a subsequent `createEvalAccount`. Eval creation has a `whenUserExists` guard — so eval-traders are a strict *subset* of user-traders — but that guard is one-directional: user accounts without evals are a fully valid contract state, not a decoding artifact.
+
+### Interpreting the result
+
+- **Zero rows** is an operational observation (the admin always creates an eval right after user registration in normal flow), not a contract-enforced invariant.
+- **Nonzero rows** means wallets the admin onboarded but for which no eval was ever created — potential drop-off or incomplete onboarding.
+- Off-chain signups that never hit `createUserAccount` are invisible here and are **not** counted.
+
+### Dedup note
+
+No dedup is needed on the user side: `createUserAccount` reverts with `UserAccountAlreadyExists` if the wallet is already registered, so there is exactly one `UserAccountCreated` event per trader.
+
+### Data coverage caveat
+
+**It is not certain that this query captures all registered-but-no-eval wallets from blockchain data.** The query's correctness depends entirely on `tradingaccounts_evt_useraccountcreated` being fully decoded and indexed by Dune. If that table has incomplete coverage (e.g., events emitted before Dune began decoding this contract, or a decoding gap), wallets from the missing window will not appear in the source table and will silently fall out of the result — producing a lower-bound count, not an exact one.
+
+The diagnostic query's `registered_wallets` column is the primary check: if it reads 0 (or suspiciously low), the `useraccountcreated` table is empty or under-decoded, and the main query's result is meaningless regardless of what it returns. Always cross-check `registered_wallets` against `wallets_with_eval` — if they're equal, either all registered users have evals or the user table is incomplete.
+
+### Diagnostic query
+
+A companion diagnostic query (commented out at the bottom of `registered_no_eval.sql`) reports `registered_wallets`, `wallets_with_eval`, `registered_no_eval`, and `eval_without_user` (the last must always be 0; nonzero signals a broken assumption or decoding gap). DuneSQL only runs one statement per execution — to use it, comment out the main query and uncomment the diagnostic block.
+
+---
+
 ## Common Constants
 
 | Constant | Value |
@@ -275,11 +345,11 @@ There is no balance table available via Dune's decoding for these contracts, so 
 
 | File | Dashboard widget | Metrics produced |
 |---|---|---|
-| `headline_counter.sql` | Counters | unique_traders, paid/free/total eval accounts |
+| `headline_counter.sql` | Counters | unique_traders, paid/free/total eval accounts, avg_evals_per_trader |
 | `eval_accs.sql` | Counter + line chart | Daily/cumulative eval accounts and traders |
 | `eval_passing_rate.sql` | Counter | eval_accounts, passed_evals, pass_rate_pct |
 | `onchain_rules.sql` | Table | Current drawdown/profit-target rules (%) |
-| `query_paid_vs_free_users.sql` | Counters | Paid/free/mixed/fully-paid user counts |
+| `query_paid_vs_free_users.sql` | Counters | Paid/free/mixed/fully-paid user counts + account-level totals + `ratio_free_who_purchased_pct` (9 columns) |
 | `revenue.sql` | Table | Verified revenue by fee tier (rank-pairing) |
 | `revenue_24h.sql` | Counter | Verified revenue, trailing 24h |
 | `revenue_7d.sql` | Counter | Verified revenue, trailing 7d |
@@ -288,3 +358,4 @@ There is no balance table available via Dune's decoding for these contracts, so 
 | `profit-split.sql` | Counters | Trader/protocol gross payout split |
 | `proof_of_payouts.sql` | Table | Recent payout activity feed |
 | `proof_of_funds.sql` | Table | Reconstructed Vault & Treasury balances |
+| `registered_no_eval.sql` | Table | Registered wallets that never started an eval (`trader`, `registered_at`, `registered_block`, `registration_tx`) |

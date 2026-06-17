@@ -2,7 +2,7 @@
 
 Production DuneSQL queries powering the live Hypernova dashboard. **Chain:** Arbitrum. **Schema:** `hypernova_arbitrum`. Every query here is wired to a dashboard widget — this is not the exploratory/scratch layer (see `../` for analysis drafts and validation notes).
 
-For contract architecture and the full decoded-table reference, see `../CLAUDE.md` and `../hypernova_arbitrum_tables.md`.
+For the full decoded-table column reference, see `../hypernova_arbitrum_tables.md`. Contract source is in `trading_accounts.sol` and `vault.sol`.
 
 ---
 
@@ -38,7 +38,132 @@ For contract architecture and the full decoded-table reference, see `../CLAUDE.m
 
 ---
 
-## 2. On-Chain Data Sources
+## 2. Contract Architecture
+
+Hypernova runs on two contracts deployed on Arbitrum. Both are the authoritative on-chain source for all data in this query folder.
+
+### 2.1 Contract Overview
+
+**TradingAccounts** (`trading_accounts.sol`)
+- UUPS upgradeable proxy; inherits `Ownable`, `EIP712`, `Initializable` (via Solady)
+- Manages the full trader lifecycle: user account creation → eval account creation → eval pass/fail → funded account creation → funded account acceptance → equity updates → payout requests
+- All state-changing actions are either admin-gated (`onlyAdmin`) or trader-signed via EIP-712 and submitted by a relayer
+- Holds no USDC; delegates payout execution to the Vault via `IVault.processPayout`
+
+**Vault** (`vault.sol`)
+- Non-upgradeable; inherits `Ownable`
+- USDC custodian: holds all platform USDC and transfers the trader share on every `processPayout` call
+- Only callable by the TradingAccounts contract (`onlyTradingAccounts` modifier)
+- Owner controls profit split percentage, per-transaction withdrawal limit, and pause state
+
+### 2.2 Permission Model
+
+| Role | Who | What they can do |
+|---|---|---|
+| Owner | Multisig / deployer | Upgrade TradingAccounts (UUPS); set vault and admin addresses; configure Vault (profit split, limits, pause) |
+| Admin | Hot wallet / relayer | All trader lifecycle management: create user/eval accounts, update eval/funded status, update equity, suspend/unsuspend users |
+| Trader (via relayer) | EIP-712 signer | `acceptFundedAccount`, `requestPayout`, `rejectFundedAccount`, `incrementNonce` |
+
+`createUserAccount` is `onlyAdmin` — traders cannot self-register. Every wallet that appears in any eval or funded account event was first registered by the admin.
+
+### 2.3 State Machines
+
+**EvalStatus** (stored on `EvalAccount.evalStatus`; emitted in `EvalStatusUpdated`):
+
+```
+                    passEval() [admin]
+        ┌───────────────────────────────────► PASSED
+        │
+  ACTIVE ──── updateEvalStatus() [admin] ───► SUSPENDED
+        │                                ───► FAILED
+        └──────────────────────────────────── CLOSED
+```
+
+Transitions are not enforced by the contract (except that PASSED requires `passEval`, not `updateEvalStatus`). The admin can move an account to any non-PASSED terminal status at will.
+
+Enum integer values in Dune decoded tables: `ACTIVE=0`, `PASSED=1`, `SUSPENDED=2`, `FAILED=3`, `CLOSED=4`
+
+---
+
+**FundedStatus** (stored on `FundedAccount.fundedStatus`; emitted in `FundedStatusUpdated`):
+
+```
+  [created by passEval()]
+          │
+  AWAITING_SIGNATURE ──── acceptFundedAccount() [trader EIP-712] ──► ACTIVE
+          │                                                              │
+          └──── rejectFundedAccount() [trader] ──────────────────────► CLOSED
+                                                                         │
+                                              updateFundedStatus() [admin] ──► CLOSED
+                                                                            ──► SUSPENDED
+                                                                            ──► FAILED
+```
+
+Admin cannot set `NONE` or `AWAITING_SIGNATURE` via `updateFundedStatus`. An account in `AWAITING_SIGNATURE` can only exit via `acceptFundedAccount` or `rejectFundedAccount`.
+
+Enum integer values: `NONE=0`, `AWAITING_SIGNATURE=1`, `ACTIVE=2`, `CLOSED=3`, `SUSPENDED=4`, `FAILED=5`
+
+### 2.4 Data Encoding
+
+| Field | Unit | Conversion |
+|---|---|---|
+| `assessmentFee`, `traderAmount`, `protocolAmount`, all equity values | Micro-USDC (6 decimals) | `÷ 1e6` for human-readable USDC |
+| `dailyDrawdownLimit`, `maxDrawdownLimit`, `profitTarget` | Basis points | `÷ 100` for percentage |
+| Vault `profitSplit`, per-trader `userBonusBps` | Basis points out of `BPS_DENOMINATOR` (10,000) | e.g., `8000 = 80%` |
+
+The Vault `profitSplit` is global. A per-trader `userBonusBps` set by admin is additive. Effective trader share = `(profitSplit + userBonusBps) / 10000`, capped at 100%.
+
+### 2.5 Event → Dune Table Mapping
+
+All table names follow the pattern `hypernova_arbitrum.<contract>_<evt|call>_<name>` (fully lowercase).
+
+| Solidity Event / Call | Dune Table | Key Columns |
+|---|---|---|
+| `UserAccountCreated(trader)` | `tradingaccounts_evt_useraccountcreated` | `trader` |
+| `EvalAccountCreated(trader, evalAccountId, ...)` | `tradingaccounts_evt_evalaccountcreated` | `trader`, `evalAccountId`, `assessmentFee`, `dailyDrawdownLimit`, `maxDrawdownLimit`, `profitTarget`, `initialEquity` |
+| `EvalStatusUpdated(trader, evalAccountId, status)` | `tradingaccounts_evt_evalstatusupdated` | `trader`, `evalAccountId`, `status` (enum int — see §2.3) |
+| `EvalPassed(trader, evalAccountId, ..., fundedAccountId)` | `tradingaccounts_evt_evalpassed` | `trader`, `evalAccountId`, `fundedAccountId`, `initialEquity`, `equity`, `profitTarget` |
+| `FundedAccountCreated(trader, fundedAccountId, ...)` | `tradingaccounts_evt_fundedaccountcreated` | `trader`, `fundedAccountId`, `initialEquity`, `dailyDrawdownLimit`, `maxDrawdownLimit` |
+| `FundedStatusUpdated(trader, fundedAccountId, status)` | `tradingaccounts_evt_fundedstatusupdated` | `trader`, `fundedAccountId`, `status` (enum int — see §2.3) |
+| `EquityUpdated(trader, fundedAccountId, equity)` | `tradingaccounts_evt_equityupdated` | `trader`, `fundedAccountId`, `equity` |
+| `PayoutRequested(trader, fundedAccountId, amount, nonce)` | `tradingaccounts_evt_payoutrequested` | `trader`, `fundedAccountId`, `amount`, `nonce` |
+| `FundedAccountAccepted(trader, fundedAccountId, ...)` | `tradingaccounts_evt_fundedaccountaccepted` | `trader`, `fundedAccountId`, `acceptTermsHash`, `nonce` |
+| `FundedAccountRejected(trader, fundedAccountId)` | `tradingaccounts_evt_fundedaccountrejected` | `trader`, `fundedAccountId` |
+| `UserSuspended(trader)` | `tradingaccounts_evt_usersuspended` | `trader` |
+| `UserUnsuspended(trader)` | `tradingaccounts_evt_userunsuspended` | `trader` |
+| `PayoutProcessed(trader, traderAmount, protocolAmount)` | `vault_evt_payoutprocessed` | `trader`, `traderAmount`, `protocolAmount` |
+| `requestPayout(...)` call | `tradingaccounts_call_requestpayout` | `_trader`, `_deadline`, `_amount`, `_fundedAccountId`, `call_success` |
+
+The decoded call table (`tradingaccounts_call_requestpayout`) is used — rather than the `PayoutRequested` event — wherever the EIP-712 `_deadline` parameter is needed, because event data does not include function arguments.
+
+### 2.6 Payout Execution Flow
+
+`requestPayout` and `processPayout` execute atomically in the same transaction — there is no asynchronous settlement step.
+
+```
+Trader signs EIP-712 Payout struct:
+  { trader, fundedAccountId, amount, nonce, deadline }
+          │
+          ▼
+Relayer calls TradingAccounts.requestPayout()
+  ├── Validates: signature, deadline, canWithdraw flag, ACTIVE status, amount ≤ profit
+  ├── Emits: PayoutRequested(trader, fundedAccountId, amount, nonce)
+  ├── Reduces equity by amount; sets canWithdraw = false
+  └── Calls Vault.processPayout(trader, amount, userBonusBps[trader])
+                │
+                ▼
+          Vault.processPayout()
+            ├── traderAmount = amount × (profitSplit + bonusBps) / 10000
+            ├── Transfers traderAmount USDC → trader wallet
+            └── Emits: PayoutProcessed(trader, traderAmount, amount − traderAmount)
+                        (protocol share stays in vault)
+```
+
+`protocolAmount` in `vault_evt_payoutprocessed` equals `amount − traderAmount` and is the primary protocol revenue signal used in `profit-split.sql`.
+
+---
+
+## 3. On-Chain Data Sources
 
 | Table | Description | Used By |
 |---|---|---|
@@ -51,9 +176,9 @@ For contract architecture and the full decoded-table reference, see `../CLAUDE.m
 
 ---
 
-## 3. Core Methodology
+## 4. Core Methodology
 
-### 3.1 Paid vs. Free Verification
+### 4.1 Paid vs. Free Verification
 
 The contract writes `assessmentFee` (the list price) onto **every** eval account, including ones granted for free during closed beta/alpha. There is no on-chain "paid" flag, so payment must be reconstructed by matching USDC transfers.
 
@@ -77,15 +202,15 @@ This produces correct **totals** but doesn't determine *which specific* account 
 
 Both methods produce **identical totals** (`SUM(purchased_accounts)` from `revenue.sql` = `paid_eval_accounts` from `headline_counter.sql`). The rank-pairing method additionally identifies *which* payment backs *which* account, which allows windowed revenue queries (24h/7d/30d) to correctly attribute payments to time windows.
 
-### 3.2 Revenue Methodology
+### 4.2 Revenue Methodology
 
-**All revenue queries in this folder use verified methodology** — orphan payments (paid but no matching account) and duplicate payments (paid twice for one account slot) are excluded. Every `revenue*.sql` query uses the rank-pairing variant (§3.1) and reconciles exactly with the headline counters.
+**All revenue queries in this folder use verified methodology** — orphan payments (paid but no matching account) and duplicate payments (paid twice for one account slot) are excluded. Every `revenue*.sql` query uses the rank-pairing variant (§4.1) and reconciles exactly with the headline counters.
 
 For the windowed queries (`revenue_24h.sql`, `revenue_7d.sql`, `revenue_30d.sql`), the full payment history is scanned to build correct rank assignments, then the final output is filtered to payments landing within the trailing window. This is required for rank-pairing correctness — windowing the input would shift rank assignments.
 
-### 3.3 Payout Latency
+### 4.3 Payout Latency
 
-`requestPayout` (TradingAccounts) and `processPayout` (Vault) execute in the same transaction — payout settlement itself is atomic. The only measurable latency is **off-chain**: time from the trader's EIP-712 signature to the relayer landing `requestPayout` on-chain.
+`requestPayout` (TradingAccounts) and `processPayout` (Vault) execute in the same transaction — payout settlement itself is atomic (see §2.6). The only measurable latency is **off-chain**: time from the trader's EIP-712 signature to the relayer landing `requestPayout` on-chain.
 
 There is no on-chain signing timestamp, so `payouts_latency.sql` derives one from the signed `_deadline` parameter, which the frontend sets to `signing_time + 600s`:
 
@@ -95,31 +220,31 @@ latency_sec = 600 − (_deadline − call_block_time)
 
 The 600-second offset is treated as constant; see `../payout_flow_analysis.md` for the full derivation and engineering confirmation.
 
-### 3.4 Treasury Reconstruction
+### 4.4 Treasury Reconstruction
 
 `proof_of_funds.sql` has no direct balance table to query, so it nets every inbound/outbound USDC transfer to the Vault and Treasury wallets since platform launch (2026-03-25) and sums to a running balance. This is a flow-based reconstruction, not a balance snapshot — it's only as complete as the chosen cutoff, which here covers the full life of the platform.
 
 ---
 
-## 4. Metric Glossary
+## 5. Metric Glossary
 
 | Metric | Definition | Formula / Source |
 |---|---|---|
 | `unique_traders` | Distinct wallets that created ≥1 eval account | `COUNT(DISTINCT trader)` on `evalaccountcreated` |
-| `paid_eval_accounts` / `free_eval_accounts` | Eval accounts with / without a verified matching payment | §3.1 |
+| `paid_eval_accounts` / `free_eval_accounts` | Eval accounts with / without a verified matching payment | §4.1 |
 | `pass_rate_pct` | Share of eval accounts that progressed to `EvalPassed` | `passed_evals / eval_accounts × 100` |
 | `daily_drawdown_pct` / `max_drawdown_pct` / `profit_target_pct` | Current eval risk/profit rules | Raw on-chain value (basis points) ÷ 100 |
-| `paid_users` / `free_users` / `mixed_users` / `fully_paid_users` | Trader-level payment segments | §3.1, rolled up per trader — `mixed` = has both a paid and a free account, order not considered |
-| `revenue_usdc_24h` / `_7d` / `_30d` | Verified USDC revenue from eval purchases over the trailing window | §3.1 rank-pairing, windowed on payment time |
-| `tier_revenue_usdc` / `grand_total_revenue_usdc` | Verified revenue grouped by fee tier | §3.1 rank-pairing, all-time |
-| `min_sec` / `max_sec` / `avg_sec` (payout latency) | Sign-to-payout latency distribution | §3.3 |
+| `paid_users` / `free_users` / `mixed_users` / `fully_paid_users` | Trader-level payment segments | §4.1, rolled up per trader — `mixed` = has both a paid and a free account, order not considered |
+| `revenue_usdc_24h` / `_7d` / `_30d` | Verified USDC revenue from eval purchases over the trailing window | §4.1 rank-pairing, windowed on payment time |
+| `tier_revenue_usdc` / `grand_total_revenue_usdc` | Verified revenue grouped by fee tier | §4.1 rank-pairing, all-time |
+| `min_sec` / `max_sec` / `avg_sec` (payout latency) | Sign-to-payout latency distribution | §4.3 |
 | `total_trader_usdc` / `total_protocol_usdc` | Gross USDC split between trader payouts and protocol take | `SUM(traderAmount)`, `SUM(protocolAmount)` on `payoutprocessed` |
 | `trader_pct` / `protocol_pct` | Each side's share of gross payout volume | `side_usdc / (trader_usdc + protocol_usdc) × 100` |
-| `balance` (proof of funds) | Net USDC held by Vault / Treasury since the tracking cutoff | §3.4 |
+| `balance` (proof of funds) | Net USDC held by Vault / Treasury since the tracking cutoff | §4.4 |
 
 ---
 
-## 5. Known Limitations
+## 6. Known Limitations
 
 - **`mixed_users` (query_paid_vs_free_users.sql) is order-agnostic** — it flags a trader as mixed regardless of whether the free or the paid account came first. This is intentional scope, not a defect: see `../users/08_free_to_paid_upgraders.sql` for the order-aware "upgrader" variant (free first, paid later).
 
@@ -134,7 +259,7 @@ The following were identified and fixed on 2026-06-16 — kept here for change-l
 
 ---
 
-## 6. Reference Constants
+## 7. Reference Constants
 
 | Constant | Value |
 |---|---|
@@ -144,12 +269,15 @@ The following were identified and fixed on 2026-06-16 — kept here for change-l
 | Treasury wallet | `0x43C5F0a81d538a527DbF35D27faa583AC7FADA07` |
 | Platform launch / partition-pruning & proof-of-funds cutoff | 2026-03-25 |
 | EIP-712 payout deadline TTL | 600 seconds (constant) |
+| Vault `BPS_DENOMINATOR` | 10,000 |
 
 ---
 
-## 7. Conventions for New Queries
+## 8. Conventions for New Queries
 
 - Header comment block in the `payouts_latency.sql` style: a `====` banner, one-line title (`Hypernova: <Name>`), then a short description of what's computed and how, including any non-obvious methodology or caveats.
 - Filter on partition columns (`evt_block_date`, `evt_block_time`) wherever a table supports it — prunes the scan and reduces query cost.
-- All revenue/paid-account metrics must use the **verified** methodology (§3.1) — rank-pairing for per-payment attribution, aggregate cap for totals-only. Never sum raw transfers without orphan/duplicate exclusion.
+- All revenue/paid-account metrics must use the **verified** methodology (§4.1) — rank-pairing for per-payment attribution, aggregate cap for totals-only. Never sum raw transfers without orphan/duplicate exclusion.
+- When filtering on enum columns (`status` in `evalstatusupdated` / `fundedstatusupdated`), use the integer values documented in §2.3, not string comparisons.
+- Divide equity and fee amounts by `1e6` for USDC; divide drawdown/profit-target values by `100` for percentages (see §2.4).
 - Cross-reference the broader analysis docs in the parent directory (`../payout_flow_analysis.md`, `../hypernova_arbitrum_tables.md`, `../users/README.md`) rather than re-deriving methodology inline.
